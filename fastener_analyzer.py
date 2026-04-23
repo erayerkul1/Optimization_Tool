@@ -1,7 +1,7 @@
 """
-Fastener Force Analyzer  v4
+Fastener Force Analyzer  v5
 MSC Nastran · FX=Tension, FY/FZ=Shear
-Tüm metrikler · Element ID filtresi
+Element ID filtresi · Tüm subcase'ler · 19 metrik
 """
 
 import tkinter as tk
@@ -82,14 +82,11 @@ class FastenerApp(tk.Tk):
         self.configure(bg=BG)
 
         self.raw_data    = []
-        self.filtered    = []
-        self.mode_var    = tk.StringVar(value="max")
-        self.thresh_var  = tk.StringVar(value="")
+        self.result      = []
         self.eid_all_var = tk.BooleanVar(value=True)
 
         self._build_ui()
         self._style_ttk()
-        self._on_mode_change()
         self._on_eid_toggle()
 
     # ── STYLE ─────────────────────────────────────────────────────────────────
@@ -108,9 +105,6 @@ class FastenerApp(tk.Tk):
         for o in ("Vertical", "Horizontal"):
             s.configure(f"{o}.TScrollbar",
                 background=BG3, troughcolor=BG2, borderwidth=0, arrowsize=11)
-        s.configure("TCombobox",
-            fieldbackground=BG, background=BG3, foreground=TEXT,
-            selectbackground="#1f3a5f", selectforeground=TEXT)
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
@@ -118,14 +112,14 @@ class FastenerApp(tk.Tk):
         hdr.pack(fill="x")
         tk.Label(hdr, text="  ⚙  FASTENER FORCE ANALYZER",
                  font=("Consolas", 13, "bold"), fg=ACCENT, bg="#0d2137").pack(side="left", padx=20)
-        tk.Label(hdr, text="FX=Tension  |  FY/FZ=Shear  |  19 Metrik  |  Element-bazlı",
+        tk.Label(hdr, text="FX=Tension  |  FY/FZ=Shear  |  19 Metrik  |  Tüm Subcase'ler",
                  font=FS, fg=MUTED, bg="#0d2137").pack(side="left", padx=6)
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x")
 
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True)
 
-        left = tk.Frame(body, bg=BG2, width=300)
+        left = tk.Frame(body, bg=BG2, width=280)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
         self._build_left(left)
@@ -149,8 +143,8 @@ class FastenerApp(tk.Tk):
                   ).pack(fill="x", **pad)
         self.file_lbl = tk.Label(sec, text="Henüz dosya seçilmedi",
                                  font=FS, fg=MUTED, bg=BG2,
-                                 wraplength=260, justify="left")
-        self.file_lbl.pack(fill="x", padx=14, pady=(0, 6))
+                                 wraplength=245, justify="left")
+        self.file_lbl.pack(fill="x", padx=14, pady=(0, 8))
 
         # Element ID filtresi
         sec2 = self._sec(p, "🔢  ELEMENT ID FİLTRESİ")
@@ -158,58 +152,27 @@ class FastenerApp(tk.Tk):
             sec2, text="Tüm elementler", variable=self.eid_all_var,
             bg=BG2, fg=TEXT, selectcolor=BG, activebackground=BG2,
             font=FS, cursor="hand2", command=self._on_eid_toggle)
-        self.eid_all_cb.pack(anchor="w", padx=14, pady=(4, 2))
+        self.eid_all_cb.pack(anchor="w", padx=14, pady=(6, 2))
         tk.Label(sec2, text="ID'ler (virgülle: 123,456,789):",
                  font=FS, fg=MUTED, bg=BG2).pack(anchor="w", padx=14)
         self.eid_entry = tk.Entry(sec2, **entry_cfg(), width=20)
-        self.eid_entry.pack(fill="x", padx=14, pady=(3, 8), ipady=5)
+        self.eid_entry.pack(fill="x", padx=14, pady=(3, 10), ipady=5)
 
-        # Filtre metriği
-        sec3 = self._sec(p, "📐  FİLTRE METRİĞİ")
-        tk.Label(sec3, text="MAX / MIN / Eşik için metrik:",
-                 font=FS, fg=MUTED, bg=BG2).pack(anchor="w", padx=14, pady=(4, 2))
-        self.metric_var = tk.StringVar()
-        self.metric_cb = ttk.Combobox(
-            sec3, textvariable=self.metric_var,
-            values=[m["label"] for m in METRICS],
-            state="readonly", font=FS, width=26)
-        self.metric_cb.current(len(METRICS) - 1)   # M19 varsayılan
-        self.metric_cb.pack(fill="x", padx=14, pady=(0, 8))
-
-        # Filtre modu
-        sec4 = self._sec(p, "🔍  FİLTRE MODU")
-        for val, txt in [
-            ("max",   "Her element → MAX"),
-            ("min",   "Her element → MIN"),
-            ("above", "Eşik ÜSTÜ  >"),
-            ("below", "Eşik ALTI  <"),
-        ]:
-            tk.Radiobutton(sec4, text=txt, variable=self.mode_var, value=val,
-                bg=BG2, fg=MUTED, selectcolor=BG2, activebackground=BG2,
-                font=FS, cursor="hand2",
-                command=self._on_mode_change).pack(anchor="w", padx=16, pady=2)
-
-        tf = tk.Frame(sec4, bg=BG2)
-        tf.pack(fill="x", padx=14, pady=6)
-        tk.Label(tf, text="Eşik değeri:", font=FS, fg=MUTED, bg=BG2).pack(anchor="w")
-        self.thresh_entry = tk.Entry(tf, textvariable=self.thresh_var,
-                                     **entry_cfg(), width=20)
-        self.thresh_entry.pack(fill="x", pady=3, ipady=5)
-
-        tk.Button(p, text="▶   FİLTRELE", command=self._apply_filter,
+        # Uygula
+        tk.Button(p, text="▶   FİLTRELE", command=self._apply,
                   bg=ACCENT, fg="#0d1117", font=("Consolas", 11, "bold"),
                   relief="flat", cursor="hand2", pady=9,
                   activebackground="#79c0ff", activeforeground="#0d1117"
-                  ).pack(fill="x", padx=14, pady=8)
+                  ).pack(fill="x", padx=14, pady=10)
 
         self.stat_lbl = tk.Label(p, text="", font=FS, fg=MUTED,
-                                 bg=BG2, justify="left", wraplength=270)
+                                 bg=BG2, justify="left", wraplength=250)
         self.stat_lbl.pack(fill="x", padx=14, pady=2)
 
         tk.Button(p, text="⬇  CSV Olarak Kaydet", command=self._export_csv,
                   bg=BG3, fg=TEXT, font=FM, relief="flat",
                   cursor="hand2", pady=7, activebackground=BORDER
-                  ).pack(fill="x", padx=14, pady=(4, 16))
+                  ).pack(fill="x", padx=14, pady=(8, 16))
 
     # ── SAĞ PANEL ─────────────────────────────────────────────────────────────
     def _build_right(self, p):
@@ -238,9 +201,9 @@ class FastenerApp(tk.Tk):
         self.tree = ttk.Treeview(self.tree_frame, columns=cols,
                                   show="headings", selectmode="extended")
         self.tree.heading("Element ID",   text="Element ID")
-        self.tree.column("Element ID",    width=90, anchor="center", minwidth=70)
+        self.tree.column("Element ID",    width=90,  anchor="center", minwidth=70)
         self.tree.heading("Load Case ID", text="LC ID")
-        self.tree.column("Load Case ID",  width=70, anchor="center", minwidth=60)
+        self.tree.column("Load Case ID",  width=70,  anchor="center", minwidth=60)
         for fc in ["FX", "FY", "FZ"]:
             self.tree.heading(fc, text=fc)
             self.tree.column(fc, width=90, anchor="center", minwidth=60)
@@ -257,19 +220,10 @@ class FastenerApp(tk.Tk):
         self.tree_frame.columnconfigure(0, weight=1)
 
     # ── EVENTS ────────────────────────────────────────────────────────────────
-    def _on_mode_change(self):
-        if hasattr(self, "thresh_entry"):
-            state = "normal" if self.mode_var.get() in ("above", "below") else "disabled"
-            self.thresh_entry.configure(state=state)
-
     def _on_eid_toggle(self):
         if hasattr(self, "eid_entry"):
             self.eid_entry.configure(
                 state="disabled" if self.eid_all_var.get() else "normal")
-
-    def _get_metric(self):
-        val = self.metric_var.get().strip().split()[0]  # "M19  ..." → "M19"
-        return next((m for m in METRICS if m["id"] == val), METRICS[-1])
 
     # ── CSV YÜKLE ─────────────────────────────────────────────────────────────
     def _load_csv(self):
@@ -299,34 +253,20 @@ class FastenerApp(tk.Tk):
             self.raw_data = []
             for row in rows:
                 nr = {std: row.get(col_map[norm], "") for norm, std in REQUIRED.items()}
-                for k, v in row.items():
-                    if k.strip().lower() not in REQUIRED:
-                        nr[k] = v
                 self.raw_data.append(nr)
 
             eids = len({r["Element ID"] for r in self.raw_data})
             self.file_lbl.configure(
-                text=f"✓ {Path(path).name}\n{len(rows)} satır", fg=GREEN)
-            self.stat_lbl.configure(
-                text=f"Toplam: {len(rows)} satır  |  {eids} element", fg=MUTED)
+                text=f"✓ {Path(path).name}\n{len(rows)} satır  |  {eids} element", fg=GREEN)
+            self.stat_lbl.configure(text="")
             self.status_bar.configure(text=f"Yüklendi: {path}")
         except Exception as e:
             messagebox.showerror("Hata", str(e))
 
     # ── FİLTRELE ──────────────────────────────────────────────────────────────
-    def _apply_filter(self):
+    def _apply(self):
         if not self.raw_data:
             messagebox.showwarning("Uyarı", "Önce CSV yükleyin."); return
-
-        mode   = self.mode_var.get()
-        metric = self._get_metric()
-        mid    = metric["id"]
-
-        if mode in ("above", "below"):
-            try:    thresh = float(self.thresh_var.get())
-            except: messagebox.showerror("Hata", "Geçerli eşik girin."); return
-        else:
-            thresh = None
 
         # Element ID filtresi
         if self.eid_all_var.get():
@@ -338,70 +278,51 @@ class FastenerApp(tk.Tk):
                     "Element ID girin veya 'Tüm elementler' seçin."); return
             eid_filter = {e.strip() for e in raw_eids.split(",") if e.strip()}
 
-        # Zenginleştir + (EID, LCID) bazında duplicate kaldır
-        enriched = []
-        seen_keys = set()
+        # Tüm satırları işle — (EID, LCID) bazında duplicate kaldır
+        result = []
+        seen = set()
         for row in self.raw_data:
             eid = row.get("Element ID", "")
             if eid_filter is not None and eid not in eid_filter:
                 continue
             key = (eid, row.get("Load Case ID", ""))
-            if key in seen_keys:
+            if key in seen:
                 continue
-            seen_keys.add(key)
+            seen.add(key)
             try:
                 fx = float(row["FX"]); fy = float(row["FY"]); fz = float(row["FZ"])
             except ValueError:
                 fx = fy = fz = 0.0
-            enriched.append({**row, "_vals": calc_all(fx, fy, fz),
-                              "_fx": fx, "_fy": fy, "_fz": fz})
+            result.append({
+                "Element ID":   eid,
+                "Load Case ID": row.get("Load Case ID", ""),
+                "_fx": fx, "_fy": fy, "_fz": fz,
+                "_vals": calc_all(fx, fy, fz),
+            })
 
-        # Element ID bazında grupla
-        groups: dict = {}
-        for row in enriched:
-            groups.setdefault(row["Element ID"], []).append(row)
-
-        result = []
-        for rows in groups.values():
-            valid = [r for r in rows if not math.isnan(r["_vals"][mid])]
-            if not valid:
-                continue
-            if mode == "max":
-                result.append(max(valid, key=lambda r: r["_vals"][mid]))
-            elif mode == "min":
-                result.append(min(valid, key=lambda r: r["_vals"][mid]))
-            elif mode == "above":
-                result.extend(r for r in valid if r["_vals"][mid] > thresh)
-            elif mode == "below":
-                result.extend(r for r in valid if r["_vals"][mid] < thresh)
-
-        self.filtered = result
+        self.result = result
         self._fill_tree(result)
 
-        fvals = [r["_vals"][mid] for r in result]
-        if fvals:
+        eids = len({r["Element ID"] for r in result})
+        if result:
             self.stat_lbl.configure(
-                text=(f"Satır: {len(fvals)}   "
-                      f"Min: {min(fvals):.3f}   "
-                      f"Max: {max(fvals):.3f}   "
-                      f"Ort: {sum(fvals)/len(fvals):.3f}"),
-                fg=GREEN)
+                text=f"Satır: {len(result)}  |  Element: {eids}", fg=GREEN)
         else:
             self.stat_lbl.configure(text="Eşleşen satır yok", fg=RED_)
 
+        label = "Tüm elementler" if eid_filter is None else f"{eids} element seçili"
         self.result_lbl.configure(
-            text=f"Filtre: {mid} [{mode.upper()}]  —  Tüm 19 metrik", fg=TEXT)
+            text=f"{label}  —  Tüm subcase'ler  —  19 metrik", fg=TEXT)
         self.row_count_lbl.configure(text=f"  {len(result)} satır")
-        self.status_bar.configure(
-            text=f"Tamamlandı: {len(result)} satır  |  Filtre metriği: {metric['label']}")
+        self.status_bar.configure(text=f"Tamamlandı: {len(result)} satır")
 
     def _fill_tree(self, data):
         self.tree.delete(*self.tree.get_children())
         for i, row in enumerate(data):
             self.tree.insert("", "end", tags=("even" if i % 2 == 0 else "odd",),
                 values=(
-                    row.get("Element ID", ""),
-                    row.get("Load Case ID", ""),
+                    row["Element ID"],
+                    row["Load Case ID"],
                     f"{row['_fx']:.4f}",
                     f"{row['_fy']:.4f}",
                     f"{row['_fz']:.4f}",
@@ -412,7 +333,7 @@ class FastenerApp(tk.Tk):
 
     # ── EXPORT ────────────────────────────────────────────────────────────────
     def _export_csv(self):
-        if not self.filtered:
+        if not self.result:
             messagebox.showwarning("Uyarı", "Önce filtreleme yapın."); return
         path = filedialog.asksaveasfilename(
             defaultextension=".csv",
@@ -423,16 +344,15 @@ class FastenerApp(tk.Tk):
         try:
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
-                w.writerow(["Element ID", "Load Case ID", "FX", "FY", "FZ"]
-                           + [m["label"] for m in METRICS])
-                for row in self.filtered:
+                w.writerow(["Element ID", "Load Case ID", "FX", "FY", "FZ"])
+                for row in self.result:
                     w.writerow([
-                        row.get("Element ID", ""),
-                        row.get("Load Case ID", ""),
+                        row["Element ID"],
+                        row["Load Case ID"],
                         f"{row['_fx']:.6f}",
                         f"{row['_fy']:.6f}",
                         f"{row['_fz']:.6f}",
-                    ] + [f"{row['_vals'][m['id']]:.6f}" for m in METRICS])
+                    ])
             messagebox.showinfo("Başarılı", f"Kaydedildi:\n{path}")
             self.status_bar.configure(text=f"Kaydedildi: {path}")
         except Exception as e:
